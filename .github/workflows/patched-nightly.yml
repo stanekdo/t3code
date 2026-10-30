@@ -1,0 +1,262 @@
+# Adapted from danielyc/t3code's fork-builds workflow (MIT).
+name: Patched nightly
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Official nightly tag; empty selects the newest published nightly"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patched-nightly
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPOSITORY: pingdotgg/t3code
+  PATCH_BRANCH: feat/composer-predictions
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      build: ${{ steps.resolve.outputs.build }}
+    steps:
+      - name: Resolve official nightly
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-}"
+          if [[ -z "$tag" ]]; then
+            tag="$(gh api "repos/$UPSTREAM_REPOSITORY/releases?per_page=50" --jq \
+              '[.[] | select(.draft | not) | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.[0-9]{8}\\.[0-9]+$"))][0].tag_name // ""')"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$ ]]; then
+            echo "::error::Not an official nightly tag: $tag"
+            exit 1
+          fi
+          # Verify it is a published upstream release, not just a matching ref.
+          gh release view "$tag" --repo "$UPSTREAM_REPOSITORY" --json isDraft --jq '.isDraft == false' | grep -qx true
+          release_tag="${tag}-patched"
+          build=true
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            build=false
+          fi
+          {
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+            echo "release_tag=$release_tag"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+
+      # Upstream has orphaned gitlinks in .repos; match its sparse release checkout.
+      - name: Checkout official source
+        if: steps.resolve.outputs.build == 'true'
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$UPSTREAM_REPOSITORY.git"
+          git fetch --quiet --filter=blob:none --no-tags origin "+refs/heads/main:refs/remotes/origin/main" "+refs/tags/$TAG:refs/tags/$TAG"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git -c checkout.workers=0 checkout --quiet --detach "refs/tags/$TAG"
+
+      - name: Apply feature patch
+        if: steps.resolve.outputs.build == 'true'
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git remote add fork "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git fetch --quiet --filter=blob:none --no-tags fork "+refs/heads/$PATCH_BRANCH:refs/remotes/fork/$PATCH_BRANCH"
+          head="$(git rev-parse "refs/remotes/fork/$PATCH_BRANCH")"
+          base="$(git merge-base origin/main "$head")"
+          mkdir -p "$RUNNER_TEMP/patch"
+          git diff --binary "$base" "$head" > "$RUNNER_TEMP/patch/feature.diff"
+          if ! git apply --3way --index "$RUNNER_TEMP/patch/feature.diff"; then
+            echo "::error::Patch conflicts with $TAG. Merge upstream/main into $PATCH_BRANCH, resolve, test and push. The previous release stays available."
+            exit 1
+          fi
+          git diff --binary "refs/tags/$TAG" > "$RUNNER_TEMP/patch/patched.diff"
+          {
+            echo "Official [$TAG]($GITHUB_SERVER_URL/$UPSTREAM_REPOSITORY/releases/tag/$TAG) with Claude native Prompt Suggestions and Codex subscription-backed Composer Predictions."
+            echo
+            echo "Windows x64 only. Enable suggestions per provider in Settings > Providers. Tab/Right Arrow inserts an editable draft; Esc dismisses. Nothing is sent automatically."
+            echo
+            echo "Unsigned Windows installer. Installed fork builds fetch updates from $GITHUB_REPOSITORY, not upstream."
+            echo
+            echo "Source: [$PATCH_BRANCH at $head]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$head), patch base $base; upstream $(git rev-parse "refs/tags/$TAG^{commit}")."
+            echo
+            echo "Claude feature adapted from [danielyc/t3code](https://github.com/danielyc/t3code/tree/feat/claude-prompt-ghost-text), commit 7c6d2d728caf4c6c6d2a5541428a8722614751e1 (MIT)."
+            echo
+            echo "[Build and checks]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). The attached patched.diff is the exact patch built."
+          } > "$RUNNER_TEMP/patch/release-notes.md"
+
+      - name: Setup Vite+
+        if: steps.resolve.outputs.build == 'true'
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Install test browser
+        if: steps.resolve.outputs.build == 'true'
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+
+      - name: Check patched source
+        if: steps.resolve.outputs.build == 'true'
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: vp run check:changed "$TAG" --concurrency 2
+
+      - name: Upload verified patch
+        if: steps.resolve.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch
+          path: ${{ runner.temp }}/patch/*
+          if-no-files-found: error
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout official source
+        run: |
+          set -euo pipefail
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$UPSTREAM_REPOSITORY.git"
+          git fetch --quiet --filter=blob:none --no-tags --depth=1 origin "+refs/tags/$TAG:refs/tags/$TAG"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git -c checkout.workers=0 checkout --quiet --detach "refs/tags/$TAG"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: patch
+          path: ${{ runner.temp }}/patch
+
+      - name: Apply verified patch
+        run: |
+          set -euo pipefail
+          git apply --binary "$RUNNER_TEMP/patch/patched.diff"
+          # Public upstream connection identifiers only, never local credentials.
+          cp .env.example .env
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: true
+
+      - name: Verify prediction behavior on Windows
+        run: vp test run apps/server/src/provider/PromptSuggestions.test.ts apps/server/src/provider/ComposerPredictions.test.ts packages/provider-core/src/server/promptSuggestionPrompt.test.ts
+
+      - name: Cache resource monitor
+        id: resource_monitor
+        uses: actions/cache@v4
+        with:
+          path: native/resource-monitor/target/x86_64-pc-windows-msvc/release/t3-resource-monitor.exe
+          key: resource-monitor-windows-x64-${{ hashFiles('native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.resource_monitor.outputs.cache-hit != 'true'
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Spectre-mitigated MSVC libraries
+        if: steps.resource_monitor.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe -WindowStyle Hidden -Wait -PassThru -ArgumentList @(
+            "modify", "--installPath", "`"$installPath`"", "--add",
+            "Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre", "--quiet", "--norestart"
+          )
+          if ($null -eq $proc -or $proc.ExitCode -notin @(0, 3010)) { throw "MSVC library installation failed" }
+
+      - name: Align package versions
+        run: node scripts/update-release-package-versions.ts "$VERSION"
+
+      - name: Build Windows x64 installer
+        env:
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          TEMP: ${{ runner.temp }}/desktop-stage
+          TMP: ${{ runner.temp }}/desktop-stage
+        run: |
+          mkdir -p "$RUNNER_TEMP/desktop-stage"
+          node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version "$VERSION" --output-dir release --keep-stage
+
+      - name: Verify update destination and collect assets
+        run: |
+          set -euo pipefail
+          feed="$(find "$RUNNER_TEMP/desktop-stage" -path '*/win-unpacked/resources/app-update.yml' -print)"
+          test -f "$feed"
+          grep -qx "owner: ${GITHUB_REPOSITORY%%/*}" "$feed"
+          grep -qx "repo: ${GITHUB_REPOSITORY#*/}" "$feed"
+          test -f release/nightly.yml
+          mkdir release-publish
+          cp release/*.exe release/*.blockmap release/nightly.yml release-publish/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: release-publish/*
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: patch
+          path: patch
+      - name: Publish complete prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          cp patch/patched.diff release-assets/
+          (cd release-assets && sha256sum * > SHA256SUMS.txt)
+          # A draft is not visible to auto-updaters until every asset is uploaded.
+          # Never delete or replace an already-published release.
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --draft --prerelease --latest=false --title "T3 Code $VERSION (predictions, Windows x64)" \
+            --notes-file patch/release-notes.md release-assets/*
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
