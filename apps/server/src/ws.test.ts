@@ -1,10 +1,16 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import { NodeWS } from "@effect/platform-node/NodeSocket";
 import { assert, it } from "@effect/vitest";
 import {
   AuthSessionId,
+  AuthStandardClientScopes,
   EnvironmentId,
   ProjectId,
   ThreadId,
+  RunId,
+  ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+  ORCHESTRATION_PROTOCOL_VERSION,
   ProviderDriverKind,
   ProviderInstanceId,
   WS_METHODS,
@@ -18,14 +24,17 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as Predicate from "effect/Predicate";
+import * as NetAddress from "effect/net/NetAddress";
 import * as TestClock from "effect/testing/TestClock";
-import { Headers } from "effect/http";
+import { Headers, HttpRouter, HttpServer } from "effect/http";
 import { RpcGroup, RpcMessage, RpcServer } from "effect/rpc";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -96,6 +105,7 @@ import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
+import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -108,6 +118,7 @@ import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ServerConfigModule from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as ComposerPredictions from "./provider/ComposerPredictions.ts";
 
 import * as EventStore from "./orchestration-v2/EventStore.ts";
 import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance.ts";
@@ -121,6 +132,7 @@ import * as ProjectEnrichment from "./project/ProjectEnrichmentService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import {
   layerWsRpc,
+  layer as layerWsRoutes,
   subscribeOrchestrationV2Shell,
   subscribeOrchestrationV2Thread,
   WS_RPC_SERVER_OPTIONS,
@@ -561,6 +573,108 @@ const layerConfigSources = Layer.mergeAll(
     ),
   ),
   Layer.provideMerge(NodeServices.layer),
+);
+
+it.live("delivers configured predictions through the production WebSocket route", () =>
+  Effect.gen(function* () {
+    const suggestion = {
+      id: "prediction-1",
+      runId: RunId.make("prediction-run"),
+      text: "Add a regression test.",
+    };
+    const dependencies = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      layerConfigSources,
+      Layer.mock(ServerBrowser.ServerBrowser)({}),
+      Layer.mock(VcsProcess.VcsProcess)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: process.cwd() }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+        authenticateWebSocketUpgrade: () =>
+          Effect.succeed({
+            sessionId: AuthSessionId.make("prediction-session"),
+            subject: "prediction-test",
+            method: "browser-session-cookie",
+            scopes: AuthStandardClientScopes,
+          }),
+      }),
+      Layer.mock(SessionStore.SessionStore)({
+        cookieName: "prediction-test",
+        legacyCookieName: undefined,
+        markConnected: () => Effect.void,
+        markDisconnected: () => Effect.void,
+        awaitInvalidation: () => Effect.never,
+      }),
+      Layer.mock(AnalyticsService.AnalyticsService)({
+        recordOwners: () => Effect.void,
+        record: () => Effect.void,
+      }),
+    );
+    const services = yield* Layer.build(
+      HttpRouter.serve(
+        layerWsRoutes.pipe(
+          Layer.provide(
+            Layer.succeed(ComposerPredictions.ComposerPredictions, {
+              stream: () => Stream.make(suggestion),
+            }),
+          ),
+          HttpRouter.provideRequest(dependencies),
+        ),
+        {
+          disableListenLog: true,
+          disableLogger: true,
+          middleware: (effect) => effect.pipe(Effect.tapCause((cause) => Effect.logError(cause))),
+        },
+      ).pipe(Layer.provideMerge(NodeHttpServer.layerTest), Layer.provide(dependencies)),
+    );
+    const address = Context.get(services, HttpServer.HttpServer).address;
+    if (!NetAddress.isInetAddress(address)) return yield* Effect.die("Expected a TCP test server");
+    const origin = `ws://127.0.0.1:${address.port}`;
+    const response = Promise.withResolvers<unknown>();
+    const socket = yield* Effect.acquireRelease(
+      Effect.sync(
+        () =>
+          new NodeWS.WebSocket(
+            `${origin}/ws?${ORCHESTRATION_PROTOCOL_QUERY_PARAM}=${ORCHESTRATION_PROTOCOL_VERSION}`,
+          ),
+      ),
+      (socket) => Effect.sync(() => socket.terminate()),
+    );
+    socket.on("error", (error) => response.reject(error));
+    socket.on("unexpected-response", (_request, incoming) => {
+      let body = "";
+      incoming.on("data", (data) => {
+        body += String(data);
+      });
+      incoming.on("end", () => response.reject(new Error(`${incoming.statusCode}: ${body}`)));
+    });
+    socket.on("open", () =>
+      socket.send(
+        JSON.stringify({
+          _tag: "Request",
+          id: "prediction",
+          tag: WS_METHODS.subscribePromptSuggestion,
+          payload: { threadId: "prediction-thread", runId: suggestion.runId },
+          headers: [],
+        }),
+      ),
+    );
+    socket.on("message", (data) => {
+      const frame: unknown = JSON.parse(String(data));
+      if (!Predicate.isObject(frame)) return;
+      if (frame._tag === "Chunk" && Array.isArray(frame.values)) response.resolve(frame.values[0]);
+      else if (frame._tag === "Defect" || frame._tag === "Exit")
+        response.reject(new Error(JSON.stringify(frame)));
+    });
+    assert.deepEqual(yield* Effect.promise(() => response.promise), suggestion);
+  }).pipe(Effect.scoped),
 );
 
 it.effect(

@@ -1209,6 +1209,38 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       };
     });
 
+  it.effect(
+    "resumes interrupted work with non-empty input without replaying the original request",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: "restart-continuation-input",
+            entries: codexReplayPreamble({
+              nativeThreadId: "restart-thread",
+              nativeTurnId: "restart-turn",
+              prompt: "Continue where you left off.",
+            }),
+          }),
+        );
+        yield* harness.runtime.startTurn({
+          ...makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("restart-attempt"),
+            text: "Original request must not be replayed",
+          }),
+          restartContinuationOfRunId: RunId.make("interrupted-run"),
+        });
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
   it.effect.each(["supported", "unsupported", "invalid"] as const)(
     "delivers native history with %s app-server protocol",
     (response) =>

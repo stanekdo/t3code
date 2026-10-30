@@ -6943,7 +6943,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 turnInput,
                 turnInput.restartContinuationOfRunId === undefined
                   ? yield* toCodexInput(turnInput)
-                  : [],
+                  : [{ type: "text", text: "Continue where you left off." }],
               );
             }).pipe(
               Effect.mapError(
