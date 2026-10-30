@@ -278,12 +278,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         // `codex mcp` rejects --strict-config; the overrides still apply.
         launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
       });
-      if (enabledMcpServers === null && operation === "generatePromptSuggestion") {
-        return yield* new TextGenerationError({
-          operation,
-          detail: "Cannot isolate prediction tools: Codex MCP discovery failed.",
-        });
-      }
       const mcpServersOff = codexMcpServersOff(enabledMcpServers ?? []);
       const spawnCommand = yield* resolveSpawnCommand(
         binary,
@@ -292,16 +286,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...execLaunchArgs,
           // A user's MCP server could act on the text-generation prompt.
           ...CODEX_NO_PLUGIN_ARGS,
-          ...(operation === "generatePromptSuggestion"
-            ? [
-                "--config",
-                "features.shell_tool=false",
-                "--config",
-                "features.multi_agent=false",
-                "--config",
-                'web_search="disabled"',
-              ]
-            : []),
           ...(mcpServersOff ? ["--config", mcpServersOff] : []),
           "--ephemeral",
           "--skip-git-repo-check",

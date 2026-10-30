@@ -11,6 +11,7 @@ import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/process";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
+import { makeCodexComposerPredictions } from "../CodexComposerPredictions.ts";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { chatGptModels } from "../CodexChatGptModels.ts";
 import { makeCodexManagedRuntime } from "../CodexManagedRuntime.ts";
@@ -262,6 +263,11 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
     snapshot.getSnapshot.pipe(Effect.map((value) => value.models)),
     resolveRuntime,
   );
+  const requestPromptSuggestion = yield* makeCodexComposerPredictions(
+    config,
+    undefined,
+    resolveRuntime,
+  );
   const protect = <A>(operation: string, effect: Effect.Effect<A, TextGenerationError>) =>
     runtime.auth.controller.withAccess!(effect).pipe(
       Effect.scoped,
@@ -294,6 +300,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
     enabled,
     snapshot,
     orchestrationAdapter,
+    requestPromptSuggestion,
     textGeneration,
     auth: runtime.auth.controller,
     snapshotForCwd: (cwd: string) =>

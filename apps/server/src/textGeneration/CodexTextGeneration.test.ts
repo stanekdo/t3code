@@ -196,52 +196,11 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
-  it.effect("does not generate a prediction when MCP tools cannot be isolated", () =>
-    withFakeCodexEnv(
-      { output: JSON.stringify({ suggestion: "Should not run." }), mcpServers: 1 },
-      (generation) =>
-        Effect.gen(function* () {
-          const exit = yield* Effect.exit(
-            generation.generatePromptSuggestion!({
-              cwd: process.cwd(),
-              messages: [{ role: "assistant", text: "Done." }],
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            }),
-          );
-          expect(Exit.isFailure(exit)).toBe(true);
-          if (Exit.isFailure(exit))
-            expect(Cause.pretty(exit.cause)).toContain("Cannot isolate prediction tools");
-        }),
-    ),
-  );
-  it.effect.each([
-    "--ephemeral",
-    "features.shell_tool=false",
-    "features.multi_agent=false",
-    'web_search="disabled"',
-    "model_max_output_tokens=512",
-    'mcp_servers={"test.mcp"={enabled=false}}',
-  ])("isolates composer predictions with %s", (requireArg) =>
-    withFakeCodexEnv(
-      {
-        output: JSON.stringify({ suggestion: "Add a regression test." }),
-        requireArg,
-        mcpServers: [{ name: "test.mcp", enabled: true }],
-        stdinMustContain: "Predict the next message the human",
-        requireReasoningEffort: "low",
-      },
-      (generation) =>
-        Effect.gen(function* () {
-          const result = yield* generation.generatePromptSuggestion!({
-            cwd: process.cwd(),
-            messages: [
-              { role: "user", text: "Fix cancellation." },
-              { role: "assistant", text: "Fixed cancellation. Tests are still missing." },
-            ],
-            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-          });
-          expect(result.suggestion).toBe("Add a regression test.");
-        }),
+  it.effect("does not expose a metered composer prediction generator", () =>
+    withFakeCodexEnv({ output: "" }, (generation) =>
+      Effect.sync(() => {
+        expect(Object.hasOwn(generation, "generatePromptSuggestion")).toBe(false);
+      }),
     ),
   );
   it.effect.each(["exec", "mcp list"] as const)(

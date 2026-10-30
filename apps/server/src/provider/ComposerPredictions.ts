@@ -1,6 +1,6 @@
 import {
   CodexSettings,
-  DEFAULT_TEXT_GENERATION_MODEL,
+  latestProviderTurnForAttempt,
   type PromptSuggestion,
   type PromptSuggestionSubscribeInput,
   type RunId,
@@ -158,38 +158,50 @@ const make = Effect.gen(function* () {
       );
       if (!config.promptSuggestions) return null;
       const instance = yield* instances.getInstance(shell.providerInstanceId);
-      const generate = instance?.textGeneration.generatePromptSuggestion;
+      const generate = instance?.requestPromptSuggestion;
       if (generate === undefined) return null;
       const { projection } = yield* threads.getThreadSnapshotWindow(input.threadId, {
         rowLimit: 32,
         userTurnLimit: 4,
       });
-      if (!projection.runs.some((run) => run.id === input.runId && run.status === "completed"))
+      const run = projection.runs.find((run) => run.id === input.runId);
+      if (run?.status !== "completed" || run.providerInstanceId !== shell.providerInstanceId)
+        return null;
+      const attempt = projection.attempts
+        .filter((attempt) => attempt.runId === input.runId)
+        .reduce<(typeof projection.attempts)[number] | undefined>(
+          (latest, attempt) =>
+            latest === undefined || attempt.attemptOrdinal > latest.attemptOrdinal
+              ? attempt
+              : latest,
+          undefined,
+        );
+      if (attempt?.status !== "completed") return null;
+      const providerThread = projection.providerThreads.find(
+        (thread) => thread.id === attempt.providerThreadId,
+      );
+      const providerTurn = latestProviderTurnForAttempt(
+        projection.providerTurns.filter(
+          (turn) => turn.providerThreadId === attempt.providerThreadId,
+        ),
+        attempt.id,
+      );
+      const nativeThreadId = attempt.nativeThreadId ?? providerThread?.nativeThreadRef?.nativeId;
+      const nativeTurnId = providerTurn?.nativeTurnRef?.nativeId;
+      if (
+        !nativeThreadId ||
+        !nativeTurnId ||
+        providerTurn?.status !== "completed" ||
+        providerThread?.nativeThreadRef?.nativeId !== nativeThreadId ||
+        providerThread.providerInstanceId !== shell.providerInstanceId
+      )
         return null;
       const project = yield* projects.getShell(shell.projectId);
       if (Option.isNone(project)) return null;
-      const messages = projection.visibleTurnItems.flatMap<{
-        role: "user" | "assistant";
-        text: string;
-      }>(({ item }) => {
-        switch (item.type) {
-          case "user_message":
-            return [{ role: "user" as const, text: item.text }];
-          case "assistant_message":
-            return [{ role: "assistant" as const, text: item.text }];
-          default:
-            return [];
-        }
-      });
-      if (messages.at(-1)?.role !== "assistant") return null;
       const result = yield* generate({
         cwd: shell.worktreePath ?? project.value.workspaceRoot,
-        messages,
-        modelSelection: {
-          instanceId: shell.providerInstanceId,
-          model: config.promptSuggestionModel ?? DEFAULT_TEXT_GENERATION_MODEL,
-          options: [{ id: "reasoningEffort", value: "low" }],
-        },
+        nativeThreadId,
+        nativeTurnId,
       });
       const current = yield* threads.getThreadShell(input.threadId);
       const currentSettings = yield* settings.getSettings;
@@ -201,7 +213,7 @@ const make = Effect.gen(function* () {
         current.activeRunId === null &&
         current.providerInstanceId === shell.providerInstanceId &&
         currentConfig.promptSuggestions
-        ? result.suggestion
+        ? result
         : null;
     },
     Effect.orElseSucceed(() => null),

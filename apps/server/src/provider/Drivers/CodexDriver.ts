@@ -9,6 +9,7 @@ import { ChildProcessSpawner } from "effect/process";
 
 import type * as CodexUsageHistory from "../../usage/CodexUsageHistory.ts";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
+import { makeCodexComposerPredictions } from "../CodexComposerPredictions.ts";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as ServerConfig from "../../config.ts";
@@ -267,6 +268,10 @@ export const CodexDriver: ProviderDriver<
       processEnv,
       snapshot.getSnapshot.pipe(Effect.map((value) => value.models)),
     );
+    const requestPromptSuggestion = yield* makeCodexComposerPredictions(
+      effectiveConfig,
+      processEnv,
+    );
     const snapshotForCwd = (cwd: string) =>
       !effectiveConfig.enabled
         ? snapshot.getSnapshot
@@ -365,6 +370,7 @@ export const CodexDriver: ProviderDriver<
       snapshotForCwd,
       consumeResetCredit,
       orchestrationAdapter,
+      requestPromptSuggestion,
       textGeneration,
     } satisfies ProviderInstance;
   }),

@@ -75,6 +75,11 @@ suggestion appears in the empty composer. Press **Right Arrow** or **Tab** to
 put it in the composer, where you can edit it before you send, or **Esc** to
 hide it. The suggestion disappears when you send your next message.
 
+Claude Code generates these suggestions with a small, cached request to the
+session's configured model. They consume tokens under that provider's billing
+rules; native suggestions are not inherently free. See [background token
+usage](https://code.claude.com/docs/en/costs#background-token-usage).
+
 Claude does not always have a suggestion, for example in plan mode, after an
 error, or when you are close to a usage limit. A thread where Claude is
 already running starts suggesting once Claude restarts for it.

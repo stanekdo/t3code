@@ -89,11 +89,11 @@ const RELEASES: Readonly<Record<string, CodexReleaseAsset>> = {
     archiveBytes: 142037952,
   },
   "win32-x64": {
-    version: "0.156.1",
+    version: "0.166.0",
     target: "x86_64-pc-windows-msvc",
-    url: "https://github.com/openai/codex/releases/download/rust-v0.156.1/codex-package-x86_64-pc-windows-msvc.tar.gz",
-    sha256: "a2e017db9807e6a2269a26fea0e1d9546469cef4d472a33016bc9f3ad7d3b733",
-    archiveBytes: 153839991,
+    url: "https://github.com/openai/codex/releases/download/rust-v0.166.0/codex-package-x86_64-pc-windows-msvc.tar.gz",
+    sha256: "d559bb88e74d471265857b93b7f19bc250dae527673b9191b33534478093f6bc",
+    archiveBytes: 202589789,
   },
 };
 const resolveCodexReleaseAsset = (platform: NodeJS.Platform, arch: string) =>

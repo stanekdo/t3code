@@ -50,6 +50,12 @@ export interface ProviderInstance {
     ProviderDriverError
   >;
   readonly orchestrationAdapter: ProviderAdapter.ProviderAdapterV2["Service"];
+  /** Native provider predictions only; never a text-generation or coding-turn fallback. */
+  readonly requestPromptSuggestion?: (input: {
+    readonly cwd: string;
+    readonly nativeThreadId: string;
+    readonly nativeTurnId: string;
+  }) => Effect.Effect<string | null>;
   readonly textGeneration: ProviderTextGeneration;
   readonly auth?: ProviderAuthController;
   readonly acpSessionManagement?: {

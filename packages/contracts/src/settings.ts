@@ -675,19 +675,8 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Composer predictions",
         description:
-          "Predict your next message after a reply. Uses a small request through this Codex account.",
+          "Suggest your next message using native Codex predictions. Requires an eligible ChatGPT account and Codex CLI 0.164 or newer. No ordinary inference fallback.",
         providerSettingsForm: { control: "switch" },
-      }),
-    ),
-    promptSuggestionModel: Schema.optionalKey(TrimmedNonEmptyString).pipe(
-      Schema.annotateKey({
-        title: "Prediction model",
-        description:
-          "Codex model used for composer predictions. Defaults to the lightweight text-generation model.",
-        providerSettingsForm: {
-          placeholder: DEFAULT_TEXT_GENERATION_MODEL,
-          clearWhenEmpty: "omit",
-        },
       }),
     ),
     customModels: Schema.Array(CustomModelSetting).pipe(
@@ -696,14 +685,7 @@ export const CodexSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: [
-      "binaryPath",
-      "homePath",
-      "shadowHomePath",
-      "promptSuggestions",
-      "promptSuggestionModel",
-      "launchArgs",
-    ],
+    order: ["binaryPath", "homePath", "shadowHomePath", "promptSuggestions", "launchArgs"],
   },
 );
 export type CodexSettings = typeof CodexSettings.Type;
