@@ -15,7 +15,7 @@ Codex predictions use bounded recent text, disable tools, time out, and cancel w
 
 The [Patched nightly workflow](.github/workflows/patched-nightly.yml) checks hourly at minute 17, and can be run manually. It fetches the newest published official nightly, applies the feature branch's diff with a three-way patch, runs `check:changed`, builds Windows x64, checks the embedded update destination, and publishes a prerelease with checksums and the exact patch. Conflicts or failed checks stop publication; the previous release remains available. Published releases are not overwritten.
 
-GitHub schedules can be delayed and are disabled after 60 days without repository activity. Check the Actions page and re-enable the workflow if needed. No external scheduler or personal access token is required.
+GitHub schedules can be delayed and are disabled after 60 days without repository activity. The workflow makes an empty maintenance commit after 30 quiet days to keep tracking active. If Actions is disabled manually or by GitHub, re-enable the workflow on the Actions page. No external scheduler or personal access token is required.
 
 - `fork-builds` is the default branch and owns only fork maintenance changes.
 - `feat/composer-predictions` owns the code patch. Merge `upstream/main` into it when the patch needs maintenance, resolve conflicts, run `vp run check:changed <official-nightly-tag>`, and push normally.

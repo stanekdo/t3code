@@ -23,6 +23,33 @@ env:
   PATCH_BRANCH: feat/composer-predictions
 
 jobs:
+  keep-active:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Keep upstream tracking active during quiet months
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pushed="$(gh api "repos/$GITHUB_REPOSITORY" --jq .pushed_at)"
+          if (( $(date +%s) - $(date -d "$pushed" +%s) < 30 * 86400 )); then
+            exit 0
+          fi
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git fetch --quiet --filter=blob:none --depth=1 origin fork-builds
+          git sparse-checkout set --no-cone '/README.md'
+          git -c checkout.workers=0 checkout --quiet --detach FETCH_HEAD
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty --quiet -m "chore(fork): keep nightly tracking active"
+          gh auth setup-git
+          git push origin HEAD:refs/heads/fork-builds
+
   prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -52,7 +79,7 @@ jobs:
           gh release view "$tag" --repo "$UPSTREAM_REPOSITORY" --json isDraft --jq '.isDraft == false' | grep -qx true
           release_tag="${tag}-patched"
           build=true
-          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if [[ "$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)" == "false" ]]; then
             build=false
           fi
           {
@@ -256,7 +283,17 @@ jobs:
           (cd release-assets && sha256sum * > SHA256SUMS.txt)
           # A draft is not visible to auto-updaters until every asset is uploaded.
           # Never delete or replace an already-published release.
-          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --draft --prerelease --latest=false --title "T3 Code $VERSION (predictions, Windows x64)" \
-            --notes-file patch/release-notes.md release-assets/*
+          existing="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [[ "$existing" == "false" ]]; then
+            echo "::error::Refusing to change a published release."
+            exit 1
+          elif [[ "$existing" == "true" ]]; then
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber release-assets/*
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "T3 Code $VERSION (predictions, Windows x64)" --notes-file patch/release-notes.md
+          else
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_REF_NAME" \
+              --draft --prerelease --latest=false --title "T3 Code $VERSION (predictions, Windows x64)" \
+              --notes-file patch/release-notes.md release-assets/*
+          fi
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
