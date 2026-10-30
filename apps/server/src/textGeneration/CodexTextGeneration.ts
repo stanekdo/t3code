@@ -181,15 +181,15 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         { concurrency: "unbounded" },
       );
       if (exitCode !== 0) {
-        yield* Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+        yield* Effect.logWarning("codex mcp list failed", {
           reason: "exit",
           exitCode,
         });
-        return [];
+        return null;
       }
       const servers = yield* decodeCodexMcpServers(stdout).pipe(
         Effect.tapError(() =>
-          Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+          Effect.logWarning("codex mcp list failed", {
             reason: "decode",
           }),
         ),
@@ -201,13 +201,13 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     Effect.flatMap(
       Option.match({
         onNone: () =>
-          Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+          Effect.logWarning("codex mcp list failed", {
             reason: "timeout",
-          }).pipe(Effect.as<ReadonlyArray<string>>([])),
+          }).pipe(Effect.as(null)),
         onSome: (names) => Effect.succeed(names),
       }),
     ),
-    Effect.orElseSucceed((): ReadonlyArray<string> => []),
+    Effect.orElseSucceed(() => null),
   );
 
   const runCodexJson = Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
@@ -218,6 +218,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     modelSelection,
     attachments,
     investigate,
+    timeoutMs,
+    maxOutputTokens,
   }: TextGenerationOperations.Request<S>): Effect.fn.Return<
     S["Type"],
     TextGenerationError,
@@ -269,13 +271,20 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           : {}),
       };
       const execLaunchArgs = codexExecLaunchArgs(launchArgs);
-      const mcpServersOff = yield* listEnabledMcpServers({
+      const enabledMcpServers = yield* listEnabledMcpServers({
         binary,
         cwd,
         env,
         // `codex mcp` rejects --strict-config; the overrides still apply.
         launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
-      }).pipe(Effect.map(codexMcpServersOff));
+      });
+      if (enabledMcpServers === null && operation === "generatePromptSuggestion") {
+        return yield* new TextGenerationError({
+          operation,
+          detail: "Cannot isolate prediction tools: Codex MCP discovery failed.",
+        });
+      }
+      const mcpServersOff = codexMcpServersOff(enabledMcpServers ?? []);
       const spawnCommand = yield* resolveSpawnCommand(
         binary,
         [
@@ -283,6 +292,16 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...execLaunchArgs,
           // A user's MCP server could act on the text-generation prompt.
           ...CODEX_NO_PLUGIN_ARGS,
+          ...(operation === "generatePromptSuggestion"
+            ? [
+                "--config",
+                "features.shell_tool=false",
+                "--config",
+                "features.multi_agent=false",
+                "--config",
+                'web_search="disabled"',
+              ]
+            : []),
           ...(mcpServersOff ? ["--config", mcpServersOff] : []),
           "--ephemeral",
           "--skip-git-repo-check",
@@ -292,6 +311,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           model,
           "--config",
           `model_reasoning_effort="${reasoningEffort}"`,
+          ...(maxOutputTokens === undefined
+            ? []
+            : ["--config", `model_max_output_tokens=${maxOutputTokens}`]),
           ...(serviceTier ? ["--config", `service_tier="${serviceTier}"`] : []),
           "--output-schema",
           schemaPath,
@@ -354,7 +376,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     return yield* Effect.gen(function* () {
       yield* runCodexCommand().pipe(
         Effect.scoped,
-        Effect.timeoutOption(investigate?.timeoutMs ?? CODEX_TIMEOUT_MS),
+        Effect.timeoutOption(investigate?.timeoutMs ?? timeoutMs ?? CODEX_TIMEOUT_MS),
         Effect.flatMap(
           Option.match({
             onNone: () =>

@@ -11,6 +11,10 @@ export const makeProcessProbe = Effect.gen(function* () {
   const server = NodeNet.createServer((socket) => {
     sockets.add(socket);
     let output = "";
+    socket.on("error", (error: NodeJS.ErrnoException) => {
+      // Windows resets the connection when the fixture process is killed.
+      if (error.code !== "ECONNRESET") throw error;
+    });
     socket.on("data", (chunk) => {
       output += chunk.toString();
       if (output.includes("\n")) {

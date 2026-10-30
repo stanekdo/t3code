@@ -6,6 +6,7 @@ import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@t3tools/s
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
 import type { ProviderTextGeneration } from "./textGeneration.ts";
+import { buildPromptSuggestionPrompt, sanitizePromptSuggestion } from "./promptSuggestionPrompt.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
@@ -30,6 +31,8 @@ export interface Request<S extends Schema.Top> {
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
   /** Investigate cwd with read-only tools across turns; fail if the runner cannot guarantee read-only access. */
   readonly investigate?: { readonly timeoutMs: number } | undefined;
+  readonly timeoutMs?: number;
+  readonly maxOutputTokens?: number;
 }
 
 const INVESTIGATION_TIMEOUT_MS = 15 * 60_000;
@@ -70,6 +73,18 @@ export const decodeJsonReply = <S extends Schema.Top>(
 };
 
 export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
+  const generatePromptSuggestion: NonNullable<ProviderTextGeneration["generatePromptSuggestion"]> =
+    Effect.fn(`${name}.generatePromptSuggestion`)(function* (input) {
+      const generated = yield* run({
+        operation: "generatePromptSuggestion",
+        cwd: input.cwd,
+        modelSelection: input.modelSelection,
+        timeoutMs: 20_000,
+        maxOutputTokens: 512,
+        ...buildPromptSuggestionPrompt(input.messages),
+      });
+      return { suggestion: sanitizePromptSuggestion(generated.suggestion) };
+    });
   const generateCommitMessage: ProviderTextGeneration["generateCommitMessage"] = Effect.fn(
     `${name}.generateCommitMessage`,
   )(function* (input) {
@@ -168,6 +183,7 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
   });
 
   return {
+    generatePromptSuggestion,
     generateCommitMessage,
     generatePrContent,
     generateBranchName,

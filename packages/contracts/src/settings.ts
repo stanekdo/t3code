@@ -670,13 +670,40 @@ export const CodexSettings = makeProviderSettingsSchema(
         description: "Additional CLI arguments passed to codex app-server on session start.",
       }),
     ),
+    promptSuggestions: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Composer predictions",
+        description:
+          "Predict your next message after a reply. Uses a small request through this Codex account.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
+    promptSuggestionModel: Schema.optionalKey(TrimmedNonEmptyString).pipe(
+      Schema.annotateKey({
+        title: "Prediction model",
+        description:
+          "Codex model used for composer predictions. Defaults to the lightweight text-generation model.",
+        providerSettingsForm: {
+          placeholder: DEFAULT_TEXT_GENERATION_MODEL,
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
     customModels: Schema.Array(CustomModelSetting).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
   {
-    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs"],
+    order: [
+      "binaryPath",
+      "homePath",
+      "shadowHomePath",
+      "promptSuggestions",
+      "promptSuggestionModel",
+      "launchArgs",
+    ],
   },
 );
 export type CodexSettings = typeof CodexSettings.Type;
@@ -767,9 +794,25 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    promptSuggestions: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Prompt suggestions",
+        description:
+          "Suggest a next prompt in the empty composer after each turn. Press Right Arrow or Tab to use it.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "autoCompactWindow", "idleCompaction", "launchArgs"],
+    order: [
+      "binaryPath",
+      "homePath",
+      "autoCompactWindow",
+      "idleCompaction",
+      "promptSuggestions",
+      "launchArgs",
+    ],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;

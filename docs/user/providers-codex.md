@@ -2,6 +2,20 @@
 
 Use your ChatGPT plan or an existing Codex CLI login to code in T3 Code.
 
+## Composer predictions in this fork
+
+Enable **Composer predictions** for your Codex instance in **Settings > Providers**.
+After a completed reply, the empty composer can suggest your next message. Press
+Tab or Right Arrow to insert it as an editable draft, or Esc to dismiss it. A
+prediction is never sent automatically. Turn the setting off to stop requests.
+
+Predictions use a small, separate request through the same Codex account and
+consume normal subscription usage. They are not the Codex desktop app's native
+prediction service. The optional **Prediction model** setting overrides the
+lightweight default. Only the actively viewed conversation requests predictions;
+pending requests are cancelled when its last viewer leaves. Suggestions are kept
+in memory, not added to thread history. Available in desktop and web, not mobile.
+
 ## Connect with ChatGPT
 
 Connect during onboarding or in **Settings → Providers**. For a remote machine,
