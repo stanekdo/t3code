@@ -21,7 +21,7 @@ concurrency:
 env:
   UPSTREAM_REPOSITORY: pingdotgg/t3code
   PATCH_BRANCH: feat/composer-predictions
-  PATCH_REVISION: "2"
+  PATCH_REVISION: "3"
 
 jobs:
   keep-active:
@@ -125,7 +125,7 @@ jobs:
           fi
           git diff --binary "refs/tags/$TAG" > "$RUNNER_TEMP/patch/patched.diff"
           {
-            echo "Official [$TAG]($GITHUB_SERVER_URL/$UPSTREAM_REPOSITORY/releases/tag/$TAG) with Claude native Prompt Suggestions and Codex subscription-backed Composer Predictions."
+            echo "Official [$TAG]($GITHUB_SERVER_URL/$UPSTREAM_REPOSITORY/releases/tag/$TAG) with Claude native Prompt Suggestions and Codex native Composer Predictions."
             echo
             echo "Windows x64 only. Enable suggestions per provider in Settings > Providers. Tab/Right Arrow inserts an editable draft; Esc dismisses. Nothing is sent automatically."
             echo
@@ -205,7 +205,7 @@ jobs:
           run-install: true
 
       - name: Verify prediction behavior on Windows
-        run: vp test run apps/server/src/provider/PromptSuggestions.test.ts apps/server/src/provider/ComposerPredictions.test.ts packages/provider-core/src/server/promptSuggestionPrompt.test.ts
+        run: vp test run apps/server/src/provider/PromptSuggestions.test.ts apps/server/src/provider/ComposerPredictions.test.ts apps/server/src/provider/CodexComposerPredictions.test.ts
 
       - name: Cache resource monitor
         id: resource_monitor

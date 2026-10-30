@@ -3,13 +3,13 @@
 A Windows x64 nightly fork of [T3 Code](https://github.com/pingdotgg/t3code).
 
 - **Claude Prompt Suggestions** uses Claude Code's native suggestion events, including compatible custom providers.
-- **Codex Composer Predictions** predicts the next user message through the same Codex account. It uses a small additional subscription request, not the native Codex desktop prediction service. Codex remains the coding agent.
+- **Codex Composer Predictions** uses Codex's native prediction flow with the current conversation's model and context. Requires an eligible ChatGPT account and Codex CLI 0.164 or newer. There is no ordinary inference fallback; Codex remains the coding agent.
 
 Get an installer from [Releases](https://github.com/stanekdo/t3code/releases). Builds are unsigned. Installing this fork replaces the matching official nightly installation; its desktop updater then follows this fork. The existing official installation does not change until you install a fork build.
 
 Enable **Prompt suggestions** or **Composer predictions** for each provider in **Settings > Providers**. Tab or Right Arrow inserts the suggestion as an editable draft. Esc dismisses it. Nothing is sent automatically. Disable the setting to stop suggestions. Desktop and web are supported; mobile is not.
 
-Codex predictions use bounded recent text, disable tools, time out, and cancel when the last viewer leaves. Suggestions stay in memory and are not added to conversation history. The optional **Prediction model** setting overrides the lightweight default without changing the coding model.
+Native Codex predictions disable tools, time out, and cancel when the last viewer leaves. Unsupported native predictions show no suggestion. Suggestions stay in memory and are not added to conversation history. Sending an accepted suggestion is a normal coding turn. Claude's cached native suggestions follow the configured model provider's token billing.
 
 ## How updates work
 
@@ -27,7 +27,7 @@ To build a specific official nightly:
 gh workflow run patched-nightly.yml --repo stanekdo/t3code --ref fork-builds -f tag=<official-nightly-tag>
 ```
 
-Keep the nightly version inside the app unchanged for updater ordering. The GitHub release tag adds `-patched`. Its tag points to the build-control commit; release notes identify the upstream commit, feature commit and exact patch that produced the binary. Keep local credentials and provider configuration out of the repository.
+Each patch revision adds `.patched.N` to the nightly app version and `-patched.N` to its GitHub release tag. This preserves updater ordering between patch revisions and newer official nightlies. Scheduled release tags point to the build-control commit; release notes identify the upstream commit, feature commit and exact patch that produced the binary. Keep local credentials and provider configuration out of the repository.
 
 ## Credits and license
 
