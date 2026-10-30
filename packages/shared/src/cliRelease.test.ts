@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { cliArchiveTarCommand, newestCliReleaseVersion, parseChecksums } from "./cliRelease.ts";
+import {
+  cliArchiveTarCommand,
+  cliReleaseChannelOf,
+  crossesReleaseTrack,
+  desktopUpdateChannelOf,
+  newestCliReleaseVersion,
+  parseChecksums,
+} from "./cliRelease.ts";
 
 describe("cliRelease", () => {
+  it("keeps patched nightlies on the nightly track", () => {
+    const version = "0.1.6-nightly.20261030.3917.patched.2";
+    expect(cliReleaseChannelOf(version)).toBe("nightly");
+    expect(desktopUpdateChannelOf(version)).toBe("nightly");
+    expect(crossesReleaseTrack("0.1.6-nightly.20261030.3917", version)).toBe(false);
+    expect(cliReleaseChannelOf("0.1.6-nightly.20261030.3917.patched.invalid")).toBe("stable");
+  });
   it("parses sha256sum output including binary-mode markers", () => {
     const checksums = parseChecksums(
       [

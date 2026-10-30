@@ -41,6 +41,8 @@ import {
   resolveMacPasskeySigningConfiguration,
   resolveMergedStageDependencies,
   resolveBuildOptions,
+  resolveDesktopUpdateChannel,
+  resolveDesktopProductName,
   stageWslRuntimeArchive,
   ancestorNodeModulesPaths,
   copyDirectoryPreservingSymlinks,
@@ -492,6 +494,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       for (const relativePath of releasePackageFiles.slice(1)) {
         assert.equal(yield* fs.readFileString(path.join(root, relativePath)), original);
       }
+    }),
+  );
+
+  it.effect("keeps patched nightlies on the Nightly identity and update feed", () =>
+    Effect.sync(() => {
+      const version = "0.1.6-nightly.20261030.3917.patched.2";
+      assert.equal(resolveDesktopUpdateChannel(version), "nightly");
+      assert.equal(resolveDesktopProductName(version), "T3 Code (Nightly)");
     }),
   );
 
